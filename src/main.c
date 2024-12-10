@@ -168,11 +168,26 @@ K_THREAD_DEFINE(transmis, STACKSIZE, trans , NULL, NULL, NULL,
 
 //INICIO DA RECEPÇÂO
 
-uint32_t reserva;
+uint8_t reserva;
+uint8_t traducao;
+int c = 0;
 void recepcao (){
-	reserva = reserva << 1;
-	reserva = ( reserva | gpio_pin_get(stx, 2));
+	reserva = ((reserva | gpio_pin_get(stx, 2)) << 1);
+	
+	printk("r %d\n",reserva);
+	if (((reserva & 0b00000011 ) == 0b11) && (c/2 == 1)){
+		traducao = ((traducao | 0b00000001) << 1);
+	}
+	else if (((reserva & 0b00000011)  == 0b00) && (c/2 == 1)){
+		traducao = (traducao << 1);
+	}
+	printk("t %d\n",traducao);
+	c++;
+	if (c == 32){
+		c = 0;
+	}
 }
+
 K_TIMER_DEFINE(tempo2, recepcao, NULL); //define e inicializa meu timer com o respectivo nome e função a ser chamada
 
 void mainrecepcao(){
