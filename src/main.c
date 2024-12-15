@@ -18,17 +18,18 @@
 #define PRIORITY 1
 
 
-K_MUTEX_DEFINE	(mut1);
+K_MUTEX_DEFINE	(mut1); //define e inicializa o mutex 1
 
 
 /* queue to store up to 10 messages (aligned to 4-byte boundary) */
 K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 10, 4);
 
-static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
+static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE); //coloca as informações da uart 
+//no ponteiro uart_dev
 
 /* receive buffer used in UART ISR callback */
 static char rx_buf[MSG_SIZE]; //vetor rx buf
-static int rx_buf_pos =0; 
+static int rx_buf_pos = 0; //contador de elemento do vetor
 
 /*
  * Read characters from UART until line end is detected. Afterwards push the
@@ -40,19 +41,19 @@ void serial_cb(const struct device *dev, void *user_data) //callback da serial
 	uint8_t c;
 	
 	/* read until FIFO empty */
-	if (k_mutex_lock(&mut1, K_FOREVER) == 0){
-	while (uart_fifo_read(uart_dev, &c, 1) == 1) {
+	if (k_mutex_lock(&mut1, K_FOREVER) == 0){//pega o mutex 1
+	while (uart_fifo_read(uart_dev, &c, 1) == 1) {//enquanto existir informações na uart
 		
-		if ((c == '\n' || c == '\r') && rx_buf_pos > 0) {
+		if ((c == '\n' || c == '\r') && rx_buf_pos > 0) {//se detectar enter ou mudança de linha
 			/* terminate string */
-			rx_buf[rx_buf_pos] = '\0';
+			rx_buf[rx_buf_pos] = '\0'; //volta o vetor do buf para 0
 
 			/* if queue is full, message is silently dropped */
-			k_msgq_put(&uart_msgq, &rx_buf, K_NO_WAIT);
+			k_msgq_put(&uart_msgq, &rx_buf, K_NO_WAIT);//sobe o vetor numa fila de mensagens
 
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 0;
-			k_mutex_unlock(&mut1);
+			k_mutex_unlock(&mut1);//quando o 
 			printk("Carregando dados\n");
 		} else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {
 			rx_buf[rx_buf_pos++] = c;
@@ -86,12 +87,13 @@ int m = 1; // variavel auxiliar que faz a contagem de dados enviados por capsula
 int k; // variavel auxiliar para a chamada do etx
 uint8_t  d = 0;
 int vetaux[7];
+uint8_t palavra = 0b01010101; //capsula da mensagem
+uint8_t sync = 0b00010110;
+uint8_t st = 0b00000010;
+uint8_t id = 0b00001000;
+uint8_t etx = 0b00000011;
 void transmissao (struct k_timer *tempo){ //transmissão por bit bang
-	uint8_t palavra = 0b01010101; //capsula da mensagem
-    uint8_t sync = 0b00010110;
-    uint8_t st = 0b00000010;
-    uint8_t id = 0b00001000;
-    uint8_t etx = 0b00000011;
+
 	uint8_t aux;
 	
 	char tx_buf[MSG_SIZE];
@@ -108,12 +110,14 @@ void transmissao (struct k_timer *tempo){ //transmissão por bit bang
 			printk("vet  %d\n",j);
 		}
 			if (i<8){  // transmissão da parte inicial da capsula
-				aux = (palavra >> i) & 0b00000001;
+				aux = (palavra >> i) & 0b00000001;//o contador escolhe exatamente um bit da palavra e joga no bit menos significativo
+				//e faz uma mascara para colocar esse bit em aux
 				gpio_pin_set(stx, 3, aux);
 				//printk ("Palavra %d\n",aux);
 			}
 			else if (i<16){
-				aux = (sync >> (i%8)) & 0b00000001;
+				aux = (sync >> (i%8)) & 0b00000001;//como a cada 8 bits é precisso rodar de novo o byte, o % serve bem, pois independente do tamanho
+				//do contador, ele varia ciclicamente de 0 a 7 
 				gpio_pin_set(stx, 3, aux);
 				//printk ("Sync %d\n",aux);
 			}
@@ -129,8 +133,9 @@ void transmissao (struct k_timer *tempo){ //transmissão por bit bang
 				//printk ("id %d\n",aux);
 			}
 			if(i > 32){
-				if ((m = (j - ((i-32)/8)) )> 0 ){ // transmissão da mensagem
-					aux = (vetaux[(i-32)/8] >> (i%8) & 0b00000001);
+				if ((m = (j - ((i-32)/8)) )> 0 ){ // transmissão da mensagem //como aqui eu não sei inicialmente a quantidade de bytes uteis a serem enviados
+				//eu uso do contador j que me fala quantos são, assim vou bubtraindo conforme o contador avança
+					aux = (vetaux[(i-32)/8] >> (i%8) & 0b00000001); //aqui eu rodo o contador do vetor, pois cada byte é uma posição do vetor
 					gpio_pin_set(stx, 3, aux);
 					//printk (" dado %d  letra %c\n ",aux , vetaux[(i-32)/8]);
 				}
@@ -139,14 +144,15 @@ void transmissao (struct k_timer *tempo){ //transmissão por bit bang
 				aux = (etx >> (i%8)) & 0b00000001;
 				gpio_pin_set(stx, 3, aux);
 				//printk ("ETX %d\n",aux);
-				k++;
+				k++;// como eu não sei no inicio do codigo quantos bytes eu vou ter que transmitir não faz sentido usar o contador i aqui
+				// por isso criei o contador k que depende de certas condições para começar a ser contado
 			}
 			i++;
 			if (k == 8){
                 i = 0;// desfazer
 				m = 1;
                 j = 0;
-				k = 0;
+				k = 0;  //aqui a mensagem é finalizada e os contadores são restaurados 
 			}
 
 
@@ -168,25 +174,46 @@ K_THREAD_DEFINE(transmis, STACKSIZE, trans , NULL, NULL, NULL,
 
 //INICIO DA RECEPÇÂO
 
-uint8_t reserva;
+uint32_t reserva;
 uint8_t traducao;
 int c = 0;
+bool g;
+int y = 0;
+
+K_MUTEX_DEFINE (mut2);
+K_CONDVAR_DEFINE (condvar1);
 void recepcao (){
-	reserva = ((reserva | gpio_pin_get(stx, 2)) << 1);
+	k_mutex_lock(&mut2, K_FOREVER);
+	g = gpio_pin_get(stx, 2);
+	reserva = ((reserva | g) << 1);
+	//printk("r %d\n",g);
+	if (((reserva & 0b110 ) == 0b110) && (c%4 == 2)){
+		traducao = ((traducao >> 1) | 1<<7);
+		g = 1;
+		//printk("g %d\n",g);
+		k_condvar_signal(&condvar1);
+		k_mutex_unlock(&mut2);
+	}
+	else if (((reserva & 0b110)  == 0b00) && (c%4 == 2)){
+		traducao = (traducao >> 1);
+		g = 0;
+		//printk("g %d\n",g);
+		k_condvar_signal(&condvar1);
+		k_mutex_unlock(&mut2);
+	}else {
+		//c = 0;
+		//printk("dado lixo\n");
+
+	}
 	
-	printk("r %d\n",reserva);
-	if (((reserva & 0b00000011 ) == 0b11) && (c/2 == 1)){
-		traducao = ((traducao | 0b00000001) << 1);
-	}
-	else if (((reserva & 0b00000011)  == 0b00) && (c/2 == 1)){
-		traducao = (traducao << 1);
-	}
-	printk("t %d\n",traducao);
 	c++;
-	if (c == 32){
+	//printk("c %d\n",c);
+		if (c == 32 ){
 		c = 0;
+		y = 0;
 	}
 }
+
 
 K_TIMER_DEFINE(tempo2, recepcao, NULL); //define e inicializa meu timer com o respectivo nome e função a ser chamada
 
@@ -195,6 +222,56 @@ void mainrecepcao(){
 	k_timer_start(&tempo2, K_MSEC(100), K_MSEC(100));
 }
 
-
 K_THREAD_DEFINE(recept, STACKSIZE, mainrecepcao , NULL, NULL, NULL,
+		3, 0, 0);
+
+
+//INICIO DA INTERPRETAÇÃO
+
+uint8_t texto [8];
+uint8_t suporte;
+uint8_t vetor [10];
+int cont = 0;
+int cont1 = 2;
+void interpretacao (){
+	k_mutex_lock(&mut2, K_FOREVER);
+	//printk("%d = %d\n",traducao, sync);
+	for (int s = 7; s>-1;s--){
+		printk("%d ",(traducao >> s ) & 1 );
+	}
+		printk("c %d\n",c);
+	if((traducao ^ sync) == 0){
+		cont = c ;
+		vetor [0] = traducao;
+		printk("sync %d\n",cont);
+
+	}
+	if(cont == c){
+	printk("sim\n");
+		if ((traducao ^ st ) == 0 ){
+			vetor [1] = traducao;
+			printk("stx\n");
+			y = 1;
+		}
+		if (y == 1){
+			vetor [cont1] = traducao;
+			
+		}
+
+
+	}
+	//printk("fui chamado\n");
+	k_condvar_wait(&condvar1, &mut2, K_FOREVER);
+	k_mutex_unlock(&mut2);
+
+}
+K_TIMER_DEFINE(tempo3, interpretacao, NULL);
+void maintraducao (){
+	k_timer_start(&tempo3, K_MSEC(100), K_MSEC(100));
+		
+		
+		printk("condvar release\n");
+
+}
+K_THREAD_DEFINE(trad, STACKSIZE, maintraducao , NULL, NULL, NULL,
 		3, 0, 0);
