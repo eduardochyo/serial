@@ -1,5 +1,4 @@
 
-
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
@@ -210,7 +209,6 @@ void recepcao (){
 	//printk("c %d\n",c);
 		if (c == 32 ){
 		c = 0;
-		y = 0;
 	}
 }
 
@@ -232,7 +230,10 @@ uint8_t texto [8];
 uint8_t suporte;
 uint8_t vetor [10];
 int cont = 0;
-int cont1 = 2;
+int cont1 = 3;
+int aux2;
+bool fim;
+bool sincronizado;
 void interpretacao (){
 	k_mutex_lock(&mut2, K_FOREVER);
 	//printk("%d = %d\n",traducao, sync);
@@ -244,21 +245,44 @@ void interpretacao (){
 		cont = c ;
 		vetor [0] = traducao;
 		printk("sync %d\n",cont);
+		y = 3;
+		sincronizado = 1;
 
 	}
-	if(cont == c){
-	printk("sim\n");
+	else if(cont == c && sincronizado == 1){
+		printk("sim\n");
 		if ((traducao ^ st ) == 0 ){
-			vetor [1] = traducao;
-			printk("stx\n");
-			y = 1;
-		}
-		if (y == 1){
+		vetor [1] = traducao;
+		y = 1;
+		printk("stx y = %d\n",y);
+		}else if (y == 1){
+			vetor [2] = traducao;
+			aux2 = (traducao & 0b111);
+			y = 2;
+			printk("n id %d\n",aux2);
+		}else if (y == 2){
 			vetor [cont1] = traducao;
-			
+			printk("dado\n");
+			fim = 1;
+			cont1++;
+		}else{
+			y = 0;
+			cont1 = 3;
+			sincronizado = 0;
+			for (int s = 0; s < 10; s++){
+				vetor [s] = 0;
+			}
 		}
-
-
+	}
+	if ((traducao ^ etx ) == 0 && fim == 1) {
+		printk("fim\n");
+		cont1 = 3;
+		y = 0;
+		sincronizado = 0;
+		for (int s = 0; s < aux2; s++){
+		printk("%c ",vetor [s]);
+		}
+		printk("\n");
 	}
 	//printk("fui chamado\n");
 	k_condvar_wait(&condvar1, &mut2, K_FOREVER);
