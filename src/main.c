@@ -21,6 +21,22 @@
 
 K_MUTEX_DEFINE	(mut1); //define e inicializa o mutex 1
 
+struct mensagem {
+	uint8_t palavra;
+	uint8_t sync;
+	uint8_t stx;
+	uint8_t id;
+	uint8_t dado1;
+	uint8_t dado2;
+	uint8_t dado3;
+	uint8_t etx;
+};
+
+
+
+
+
+
 
 /* queue to store up to 10 messages (aligned to 4-byte boundary) */
 K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 10, 4);
@@ -176,14 +192,11 @@ K_THREAD_DEFINE(transmis, STACKSIZE, trans , NULL, NULL, NULL,
 //INICIO DA RECEPÇÂO
 
 uint32_t reserva;
-uint8_t traducao;
-
 bool g;
-uint8_t cont4;
 uint8_t cont2;
-
-K_MSGQ_DEFINE(recept_msgq, 2, 100, 4);
- uint32_t recept_buf[2];
+int cont3 = 0;
+int cont4 = 0;
+ uint32_t recept_buf[100];
 
 K_MUTEX_DEFINE (mut2);
 K_CONDVAR_DEFINE (condvar1);
@@ -196,12 +209,13 @@ void recepcao (){
 		
 		//printk ("%d\n",reserva);
 		if (recebendo == 1){
-			if (cont2 == 32){
-				recept_buf [0] = reserva;
-				recept_buf [1] = '\0';
-				k_msgq_put(&recept_msgq, &recept_buf, K_NO_WAIT);
-				printk("mandei 1");
+			if (cont2 == 31){
+				recept_buf [cont3] = reserva;
+				//printk("%d \n",recept_buf [cont3] );
+				cont3++;
+				printk("cont3 = %d cont4 = %d\n",cont3,cont4);
 				cont2 = 0;
+				//printk(" %d ",reserva);
 			}else{
 				cont2++;
 			}
@@ -209,11 +223,11 @@ void recepcao (){
 			if (reserva == -1 || reserva == 0){
 				//printk("vazio  ");
 			}else if (((reserva & 0b01000100010001000100010001000100) == ((reserva & 0b00100010001000100010001000100010) << 1 ))){
-				//printk(" %d",reserva);
-				//printk(" %d__",reserva);
-				recept_buf [0] = reserva;
-				recept_buf [1] = '\0';
-				k_msgq_put(&recept_msgq, &recept_buf, K_NO_WAIT);
+				
+				recept_buf [cont3] = reserva;
+				//
+				//printk("%d \n",recept_buf [cont3] );
+				cont3++;			
 				//printk("mandei 2 \n");
 				//printk(" %d",recept_buf[0]);
 			}
@@ -235,21 +249,75 @@ K_THREAD_DEFINE(recept, STACKSIZE, mainrecepcao , NULL, NULL, NULL,
 
 
 int aux2;//registra o número de elementos do vetor
-//bool fim; 
-uint64_t interpret_buf [2];
 
+int cont5 = 0;
+uint8_t preguica = 0;
+uint8_t ndados;
 void maintraducao (){
 	while(1){
-		k_msgq_get(&recept_msgq, interpret_buf, K_NO_WAIT);
-		printk("%lld \n",interpret_buf [0] );
-		if (permissao == 0 && interpret_buf [0] == 0b000000000000011110000111111110000){
-			permissao = 1;
-			recebendo = 1;
-			printk("isso");
-		}//else if ( permissao == 1 && interpret_buf [1] == )
-		k_usleep(2500);
+		printk ("");
+		//printk("cont3 = %d cont4 = %d\n",cont3,cont4);
+		if (cont3 > cont4 ){
+			
+			if (permissao == 0){
+				if(recept_buf [cont4] == 0b000000000000011110000111111110000){
+					permissao = 1;
+					recebendo = 1;
+					printk("sync\n");
+				}
+			}else{
+				if(permissao == 1 && recept_buf [cont4] == 0b00000000000000000000000011110000){
+				permissao = 2;
+				printk("stx\n");
+				}else if (permissao > 1){
+					//printk("%d \n",recept_buf [cont4] );
+					for (int s = 0; s < 8; s++){
+						preguica = (preguica | ((recept_buf [cont4] & (1 << (s * 4))) >> (s * 3)));
+						//printk("preguica = %d   s = %d \n",preguica,s);
+					}
+					if (permissao == 2){
+						ndados = preguica & 7;
+
+						printk("id = %d \n",preguica);
+						printk("ndados = %d \n",ndados);
+						preguica = 0;
+						permissao = 3;	
+					}else if (permissao == 3){
+						printk("dado%d = %c \n",cont5,preguica);
+						cont5++;
+						preguica = 0;
+						if (cont5 == ndados){
+							permissao = 4;
+							//cont3++;
+						}
+					}else if (permissao == 4 && recept_buf [cont4] == 0b0000000000000000000000011111111 ){
+						printk("etx\n");
+						permissao = 0;
+						cont3 = 0;
+						cont4 = 0;
+						cont5 = 0;
+						recebendo = 0;
+					}else{
+						printk("erro\n");
+						permissao = 0;
+						cont3 = 0;
+						cont4 = 0;
+						cont5 = 0;
+						recebendo = 0;
+					}
+				}
+				k_usleep(2500);
+			}
+			cont4++;
+		}	
 	}
 		
 }
 K_THREAD_DEFINE(trad, STACKSIZE, maintraducao , NULL, NULL, NULL,
 		3, 0, 0);
+
+// struct printk_data_t {
+// 	void *fifo_reserved; /* 1st word reserved for use by fifo */
+// 	uint32_t led;
+// 	uint32_t cnt;
+// };
