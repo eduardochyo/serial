@@ -21,15 +21,15 @@
 
 K_MUTEX_DEFINE	(mut1); //define e inicializa o mutex 1
 
-struct mensagem {
-	uint8_t palavra;
-	uint8_t sync;
-	uint8_t stx;
+struct texto {
 	uint8_t id;
 	uint8_t dado1;
 	uint8_t dado2;
 	uint8_t dado3;
-	uint8_t etx;
+	uint8_t dado4;
+	uint8_t dado5;
+	uint8_t dado6;
+	uint8_t dado7;
 };
 
 
@@ -40,6 +40,8 @@ struct mensagem {
 
 /* queue to store up to 10 messages (aligned to 4-byte boundary) */
 K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 10, 4);
+
+K_MSGQ_DEFINE(msg_fifo, 8, 100, 4); // salva as posições de memoria em que as mensagens estao escritas
 
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE); //coloca as informações da uart 
 //no ponteiro uart_dev
@@ -60,7 +62,7 @@ void serial_cb(const struct device *dev, void *user_data) //callback da serial
 {// aceita como parametros o ponteiro dev, que contem as informaçoes da device tree sobre a uart
 // e o ponteiro user data
 	uint8_t c;
-
+	
 
 	/* read until FIFO empty */
 	
@@ -73,15 +75,30 @@ void serial_cb(const struct device *dev, void *user_data) //callback da serial
 			rx_buf[rx_buf_pos] = '\0'; //volta o vetor do buf para 0
 			rx_buf[3] = rx_buf[3] | cont0;
 			/* if queue is full, message is silently dropped */
-
+			
 			k_msgq_put(&uart_msgq, &rx_buf, K_NO_WAIT);//sobe o vetor numa fila de mensagens
-
+			struct texto mensagem_enviada  = {
+			.id = rx_buf[3],
+			.dado1 = rx_buf [4],
+			.dado2 = rx_buf [5],
+			.dado3 = rx_buf [6],
+			.dado4 = rx_buf [7],
+			.dado5 = rx_buf [8],
+			.dado6 = rx_buf [9],
+			.dado7 = rx_buf [10],
+			};
+			k_msgq_put(&msg_fifo, &mensagem_enviada, K_NO_WAIT);
+			for (int r = 4; r<11;r++){
+			rx_buf[r] = 0;
+			}
+			rx_buf[3] = 0b00001000;
+			
 			/* reset the buffer (it was copied to the msgq) */
 			rx_buf_pos = 4;
 			//printk("Carregando dados 1\n");
 			mensagem++;
 			cont0 = 0;
-			rx_buf[3] = 0b00001000;
+			
 		} else if ((cont0 == 7) && (rx_buf_pos > 0)){
 			rx_buf[rx_buf_pos] = 0b00000011; // acrescenta o ETX
 			rx_buf_pos++;
@@ -89,18 +106,43 @@ void serial_cb(const struct device *dev, void *user_data) //callback da serial
 			rx_buf[3] = rx_buf[3] | 7;
 			k_msgq_put(&uart_msgq, &rx_buf, K_NO_WAIT);//sobe o vetor numa fila de mensagens
 			/* reset the buffer (it was copied to the msgq) */
-			rx_buf_pos = 5;
+			rx_buf_pos = 4;
 			//printk("Carregando dados 2\n");
 			rx_buf[rx_buf_pos] = c;
-			printk ("%c",c);
+			printk ("%c",rx_buf[rx_buf_pos]);
+			struct texto mensagem_enviada  = {
+			.id = rx_buf[3],
+			.dado1 = rx_buf [4],
+			.dado2 = rx_buf [5],
+			.dado3 = rx_buf [6],
+			.dado4 = rx_buf [7],
+			.dado5 = rx_buf [8],
+			.dado6 = rx_buf [9],
+			.dado7 = rx_buf [10],
+			};
+			for (int r = 4; r<10;r++){
+				printk("dado%d = %d",r,rx_buf[r]);
+				rx_buf[r] = 0;
+			}
+			rx_buf[3] = 0b00001000;
+			k_msgq_put(&msg_fifo, &mensagem_enviada, K_NO_WAIT);
 			mensagem++;
 			cont0 = 1;
+			rx_buf_pos++;
 		}else if (rx_buf_pos < (sizeof(rx_buf) - 1)) {
-				rx_buf[rx_buf_pos++] = c;
-				printk ("%c",c);
+				rx_buf[rx_buf_pos] = c;
+				printk ("%c",rx_buf[rx_buf_pos]);
+				rx_buf_pos++;
 				cont0++;
 		}
+		
+		c = 0;
 	}
+	
+
+	
+
+		//printk ("alberto  = %d",mensagem_enviada.dado1);
 		/* else: characters beyond buffer size are dropped */
 
 }
@@ -127,7 +169,7 @@ uint8_t j = 0; //variavel de contagem de elemntos dentro do vetor
  // variavel auxiliar que faz a contagem de dados enviados por capsula
 uint8_t cont1 = 0; // variavel auxiliar para a chamada do etx
 uint8_t  d = 0;// variável em que colocamos o id e o número de dados
-int vetaux[7];// vetor auxiliar utilizado para chegar ao valor de dados
+// vetor auxiliar utilizado para chegar ao valor de dados
 uint8_t vetmsg [12] = {};
 int c = 0;// sincronizador da recepção
 char tx_buf[MSG_SIZE];//vetor em que colocamos os valores na fila
@@ -172,7 +214,7 @@ void trans (){
 				}	
 				cont1 = 0;
 				
-				printk("j = %d\n",j);
+				printk("\nj = %d\n",j);
 				transmitindo = 1;
 			}
 			if (cont1 == j){
@@ -184,6 +226,7 @@ void trans (){
 			}
 			k_msleep((80 * j));
 		}
+		k_msleep((10));
 	}
 }
 K_THREAD_DEFINE(transmis, STACKSIZE, trans , NULL, NULL, NULL,
@@ -213,7 +256,7 @@ void recepcao (){
 				recept_buf [cont3] = reserva;
 				//printk("%d \n",recept_buf [cont3] );
 				cont3++;
-				printk("cont3 = %d cont4 = %d\n",cont3,cont4);
+				//printk("cont3 = %d cont4 = %d\n",cont3,cont4);
 				cont2 = 0;
 				//printk(" %d ",reserva);
 			}else{
@@ -223,13 +266,8 @@ void recepcao (){
 			if (reserva == -1 || reserva == 0){
 				//printk("vazio  ");
 			}else if (((reserva & 0b01000100010001000100010001000100) == ((reserva & 0b00100010001000100010001000100010) << 1 ))){
-				
 				recept_buf [cont3] = reserva;
-				//
-				//printk("%d \n",recept_buf [cont3] );
 				cont3++;			
-				//printk("mandei 2 \n");
-				//printk(" %d",recept_buf[0]);
 			}
 		}
 }
@@ -249,7 +287,8 @@ K_THREAD_DEFINE(recept, STACKSIZE, mainrecepcao , NULL, NULL, NULL,
 
 
 int aux2;//registra o número de elementos do vetor
-
+char int_buf[MSG_SIZE];
+struct texto mensagem_comparacao;
 int cont5 = 0;
 uint8_t preguica = 0;
 uint8_t ndados;
@@ -258,7 +297,7 @@ void maintraducao (){
 		printk ("");
 		//printk("cont3 = %d cont4 = %d\n",cont3,cont4);
 		if (cont3 > cont4 ){
-			
+		//printk (".");
 			if (permissao == 0){
 				if(recept_buf [cont4] == 0b000000000000011110000111111110000){
 					permissao = 1;
@@ -273,17 +312,21 @@ void maintraducao (){
 					//printk("%d \n",recept_buf [cont4] );
 					for (int s = 0; s < 8; s++){
 						preguica = (preguica | ((recept_buf [cont4] & (1 << (s * 4))) >> (s * 3)));
-						//printk("preguica = %d   s = %d \n",preguica,s);
+						
 					}
+					//printk("preguica = %d  \n",preguica);
 					if (permissao == 2){
 						ndados = preguica & 7;
-
 						printk("id = %d \n",preguica);
 						printk("ndados = %d \n",ndados);
+						int_buf [7] = preguica;
 						preguica = 0;
 						permissao = 3;	
+
 					}else if (permissao == 3){
 						printk("dado%d = %c \n",cont5,preguica);
+						int_buf [cont5] = preguica; 
+						//printk ("cont4 = %d \n",cont4);
 						cont5++;
 						preguica = 0;
 						if (cont5 == ndados){
@@ -297,6 +340,42 @@ void maintraducao (){
 						cont4 = 0;
 						cont5 = 0;
 						recebendo = 0;
+						preguica = 0;
+						struct texto mensagem_recebida  = {
+						.id = int_buf[7],
+						.dado1 = int_buf [0],
+						.dado2 = int_buf [1],
+						.dado3 = int_buf [2],
+						.dado4 = int_buf [3],
+						.dado5 = int_buf [4],
+						.dado6 = int_buf [5],
+						.dado7 = int_buf [6],
+						};
+						for (int y = 0; y < 8; y++){
+							int_buf [y] = 0;
+						}
+						//printk("MEu id  = %d",mensagem_recebida.id & 11111000);
+						if ((mensagem_recebida.id & 11111000) == 0b00001000){
+							//printk("meu dado\n");
+							k_msgq_get(&msg_fifo, &mensagem_comparacao, K_NO_WAIT);
+							
+							printk("teste  = %d\n",mensagem_comparacao.id);
+							printk("teste  = %d\n",mensagem_comparacao.dado1);
+							printk("teste  = %d\n",mensagem_comparacao.dado2);
+							printk("teste  = %d\n",mensagem_comparacao.dado3);
+							printk("teste  = %d\n",mensagem_comparacao.dado4);
+							printk("teste  = %d\n",mensagem_comparacao.dado5);
+							printk("teste  = %d\n",mensagem_comparacao.dado6);
+							printk("teste  = %d\n",mensagem_comparacao.dado7);
+
+
+
+							if (memcmp(&mensagem_comparacao, &mensagem_recebida, sizeof(struct texto)) == 0) {
+      				 		 printf("As structs são iguais.\n");
+  							} else {
+    						printf("As structs são diferentes.\n");
+    						}
+						} 
 					}else{
 						printk("erro\n");
 						permissao = 0;
@@ -304,12 +383,17 @@ void maintraducao (){
 						cont4 = 0;
 						cont5 = 0;
 						recebendo = 0;
+						preguica = 0;
+						for (int y = 0; y < 8; y++){
+							int_buf [y] = 0;
+						}
 					}
 				}
 				k_usleep(2500);
 			}
 			cont4++;
-		}	
+		}
+		k_usleep(500);
 	}
 		
 }
